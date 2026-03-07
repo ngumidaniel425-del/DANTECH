@@ -28,7 +28,7 @@ if ($type == "attendance" || $type == "attendance_upload") {
 
 // --- 2. STUDENT REGISTRATION (SINGLE) ---
 } elseif ($type == "register_student") {
-    $query = "INSERT INTO students_master (admission, fullname, class_name, school_name) VALUES ($1, $2, $3, $4) ON CONFLICT (admission, class_name) DO UPDATE SET fullname = EXCLUDED.fullname";
+    $query = "INSERT INTO students_master (admission, fullname, class_name, school_name) VALUES ($1, $2, $3, $4) ON ON CONFLICT (admission, school_name) DO UPDATE SET fullname = EXCLUDED.fullname";
     $result = pg_query_params($conn, $query, array($data['admission'], $data['fullname'], $data['class_name'], $data['school_name']));
     echo json_encode(["status" => $result ? "success" : "error"]);
 
@@ -42,7 +42,7 @@ if ($type == "attendance" || $type == "attendance_upload") {
     foreach ($students as $s) {
         $query = "INSERT INTO students_master (admission, fullname, class_name, school_name) 
                   VALUES ($1, $2, $3, $4) 
-                  ON CONFLICT (admission, class_name) DO UPDATE SET fullname = EXCLUDED.fullname";
+                  ON CONFLICT (admission, school_name) DO UPDATE SET fullname = EXCLUDED.fullname";
         if (!pg_query_params($conn, $query, array($s['admission'], $s['fullname'], $s['class_name'], $s['school_name']))) {
             $success = false;
         }
