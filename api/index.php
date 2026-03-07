@@ -33,12 +33,17 @@ if ($type == "attendance" || $type == "attendance_upload") {
     echo json_encode(["status" => $result ? "success" : "error"]);
 
 // --- 3. FETCH ALL ---
-} elseif ($type == 'fetch_students') {
-    $school = isset($_GET['school']) ? $_GET['school'] : '';
-    $result = pg_query_params($conn, "SELECT admission, fullname, class_name, school_name FROM students_master WHERE school_name = $1", array($school));
-    $students = [];
-    while($row = pg_fetch_assoc($result)) { $students[] = $row; }
-    echo json_encode($students);
+// --- 3. FETCH ALL MASTER DATA ---
+// ... inside index.php ...
+} elseif ($type == 'fetch_master_data') {
+    $classes = pg_fetch_all(pg_query($conn, "SELECT * FROM classes"));
+    $lessons = pg_fetch_all(pg_query($conn, "SELECT * FROM lessons"));
+    
+    // Ensure we send valid JSON even if tables are empty
+    echo json_encode([
+        "classes" => $classes ? $classes : [],
+        "lessons" => $lessons ? $lessons : []
+    ]);
 }
 
 pg_close($conn);
