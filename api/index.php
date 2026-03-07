@@ -32,14 +32,38 @@ if ($type == "attendance" || $type == "attendance_upload") {
     $result = pg_query_params($conn, $query, array($data['admission'], $data['fullname'], $data['class_name'], $data['school_name']));
     echo json_encode(["status" => $result ? "success" : "error"]);
 
-// --- 3. BULK STUDENT UPLOAD ---
+// --- 3. BULK UPLOAD (Attendance AND Students) ---
 } elseif ($type == "upload_all") {
+    $success = true;
+
+    // A. Handle Students
     $students = isset($data['students']) ? $data['students'] : [];
     foreach ($students as $s) {
-        $query = "INSERT INTO students_master (admission, fullname, class_name, school_name) VALUES ($1, $2, $3, $4) ON CONFLICT (admission, class_name) DO UPDATE SET fullname = EXCLUDED.fullname";
-        pg_query_params($conn, $query, array($s['admission'], $s['fullname'], $s['class_name'], $s['school_name']));
+        $query = "INSERT INTO students_master (admission, fullname, class_name, school_name) 
+                  VALUES ($1, $2, $3, $4) 
+                  ON CONFLICT (admission, class_name) 
+                  DO UPDATE SET fullname = EXCLUDED.fullname";
+        if (!pg_query_params($conn, $query, array($s['admission'], $s['fullname'], $s['class_name'], $s['school_name']))) {
+            $success = false;
+        }
     }
-    echo json_encode(["status" => "success"]);
+
+    // B. Handle Attendance (This was missing in your upload_all block!)
+    $attendance_list = isset($data['attendance_data']) ? $data['attendance_data'] : [];
+    foreach ($attendance_list as $row) {
+        $query = "INSERT INTO attendance_sync (student_adm, student_name, class_name, lesson_name, period_type, attendance_date) 
+                  VALUES ($1, $2, $3, $4, $5, $6)
+                  ON CONFLICT DO NOTHING"; // Prevent duplicates if same record sent twice
+        if (!pg_query_params($conn, $query, array($row['student_adm'], $row['student_name'], $row['class_name'], $row['lesson_name'], $row['period_type'], $row['date']))) {
+            $success = false;
+        }
+    }
+
+    if ($success) {
+        echo json_encode(["status" => "success", "message" => "All data synced successfully"]);
+    } else {
+        echo json_encode(["status" => "error", "message" => "Some data failed to save"]);
+    }
 
 // --- 4. FETCH MASTER DATA ---
 } elseif ($type == 'fetch_master_data') {
