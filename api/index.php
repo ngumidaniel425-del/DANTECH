@@ -2,9 +2,12 @@
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: POST, GET, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
+
 if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') { exit; }
+
 header('Content-Type: application/json');
 
+// 1. Database Connection
 $connection_string = getenv('DATABASE_URL'); 
 $conn = pg_connect($connection_string);
 
@@ -13,27 +16,39 @@ if (!$conn) {
     exit();
 }
 
+// 2. Initialize Inputs
 $type = isset($_GET['type']) ? $_GET['type'] : '';
 $jsonInput = file_get_contents('php://input');
 $data = json_decode($jsonInput, true);
 
-// --- 1. ATTENDANCE UPLOAD ---
+// 3. Logic Router
 if ($type == "attendance" || $type == "attendance_upload") {
     $attendance_list = isset($data['attendance_data']) ? $data['attendance_data'] : [];
     foreach ($attendance_list as $row) {
-        $query = "INSERT INTO attendance_sync (student_adm, student_name, class_name, lesson_name, period_type, attendance_date) VALUES ($1, $2, $3, $4, $5, $6)";
+        $query = "INSERT INTO attendance_sync (student_adm, student_name, class_name, lesson_name, period_type, attendance_date) 
+                  VALUES ($1, $2, $3, $4, $5, $6) 
+                  ON CONFLICT DO NOTHING";
         pg_query_params($conn, $query, array($row['student_adm'], $row['student_name'], $row['class_name'], $row['lesson_name'], $row['period_type'], $row['date']));
     }
     echo json_encode(["status" => "success"]);
-    // --- NEW: ADD LESSON WITH CONFLICT HANDLING ---
+
+} elseif ($type == "add_class") {
+    $class_name = isset($data['class_name']) ? $data['class_name'] : '';
+    if (!empty($class_name)) {
+        $query = "INSERT INTO classes (class_name) VALUES ($1) ON CONFLICT (class_name) DO NOTHING";
+        $result = pg_query_params($conn, $query, array($class_name));
+        echo json_encode(["status" => "success"]);
+    } else {
+        echo json_encode(["status" => "error", "message" => "Class name empty"]);
+    }
+
 } elseif ($type == "add_lesson") {
     $teacher_id = isset($data['teacher_id']) ? $data['teacher_id'] : 0;
     $lesson_name = isset($data['lesson_name']) ? $data['lesson_name'] : '';
     $school_name = isset($data['school_name']) ? $data['school_name'] : '';
 
     if (!empty($lesson_name)) {
-        // This query checks for a conflict on the 'lesson_name' column
-        // Ensure 'lesson_name' has a UNIQUE constraint in your Postgres table!
+        // Corrected ON CONFLICT to match your Postgres unique constraints
         $query = "INSERT INTO lessons (teacher_id, lesson_name, school_name) 
                   VALUES ($1, $2, $3) 
                   ON CONFLICT (lesson_name) 
@@ -45,13 +60,15 @@ if ($type == "attendance" || $type == "attendance_upload") {
         echo json_encode(["status" => "error", "message" => "Missing lesson name"]);
     }
 
-// --- 2. STUDENT REGISTRATION (SINGLE) ---
 } elseif ($type == "register_student") {
-    $query = "INSERT INTO students_master (admission, fullname, class_name, school_name) VALUES ($1, $2, $3, $4) ON ON CONFLICT (admission, school_name) DO UPDATE SET fullname = EXCLUDED.fullname";
+    // FIXED: Removed the double "ON ON" and aligned conflict with (admission, school_name)
+    $query = "INSERT INTO students_master (admission, fullname, class_name, school_name) 
+              VALUES ($1, $2, $3, $4) 
+              ON CONFLICT (admission, school_name) 
+              DO UPDATE SET fullname = EXCLUDED.fullname";
     $result = pg_query_params($conn, $query, array($data['admission'], $data['fullname'], $data['class_name'], $data['school_name']));
     echo json_encode(["status" => $result ? "success" : "error"]);
 
-// --- 3. BULK UPLOAD (Attendance AND Students) ---
 } elseif ($type == "upload_all") {
     $success = true;
     $students = isset($data['students']) ? $data['students'] : [];
@@ -61,7 +78,8 @@ if ($type == "attendance" || $type == "attendance_upload") {
     foreach ($students as $s) {
         $query = "INSERT INTO students_master (admission, fullname, class_name, school_name) 
                   VALUES ($1, $2, $3, $4) 
-                  ON CONFLICT (admission, school_name) DO UPDATE SET fullname = EXCLUDED.fullname";
+                  ON CONFLICT (admission, school_name) 
+                  DO UPDATE SET fullname = EXCLUDED.fullname";
         if (!pg_query_params($conn, $query, array($s['admission'], $s['fullname'], $s['class_name'], $s['school_name']))) {
             $success = false;
         }
@@ -70,7 +88,8 @@ if ($type == "attendance" || $type == "attendance_upload") {
     // B. Handle Attendance
     foreach ($attendance_list as $row) {
         $query = "INSERT INTO attendance_sync (student_adm, student_name, class_name, lesson_name, period_type, attendance_date) 
-                  VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING";
+                  VALUES ($1, $2, $3, $4, $5, $6) 
+                  ON CONFLICT DO NOTHING";
         if (!pg_query_params($conn, $query, array($row['student_adm'], $row['student_name'], $row['class_name'], $row['lesson_name'], $row['period_type'], $row['date']))) {
             $success = false;
         }
@@ -78,7 +97,6 @@ if ($type == "attendance" || $type == "attendance_upload") {
 
     echo json_encode(["status" => $success ? "success" : "error", "message" => $success ? "Data synced" : "Sync partial failure"]);
 
-// --- 4. FETCH MASTER DATA ---
 } elseif ($type == 'fetch_master_data') {
     $classes = pg_fetch_all(pg_query($conn, "SELECT * FROM classes"));
     $lessons = pg_fetch_all(pg_query($conn, "SELECT * FROM lessons"));
