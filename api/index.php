@@ -50,10 +50,21 @@ if ($type == "attendance" || $type == "attendance_upload") {
         "classes" => $classes ? $classes : [],
         "lessons" => $lessons ? $lessons : []
     ]);
+    // ... after the fetch_master_data block ...
+
+} elseif ($type == 'debug_view') {
+    $tables = ['classes', 'lessons', 'attendance_sync', 'students_master'];
+    $debug_output = [];
+    foreach ($tables as $table) {
+        $result = pg_query($conn, "SELECT * FROM $table");
+        $debug_output[$table] = $result ? pg_fetch_all($result) : "No data";
+    }
+    echo json_encode($debug_output, JSON_PRETTY_PRINT);
 
 } else {
     echo json_encode(["status" => "error", "message" => "Invalid request type"]);
 }
 
 pg_close($conn);
+
 ?>
