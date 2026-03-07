@@ -9,7 +9,7 @@ $connection_string = getenv('DATABASE_URL');
 $conn = pg_connect($connection_string);
 
 if (!$conn) {
-    echo json_encode(["status" => "error", "message" => "Connection failed: " . pg_last_error()]);
+    echo json_encode(["status" => "error", "message" => "Connection failed"]);
     exit();
 }
 
@@ -26,24 +26,33 @@ if ($type == "attendance" || $type == "attendance_upload") {
     }
     echo json_encode(["status" => "success"]);
 
-// --- 2. STUDENT REGISTRATION ---
-} elseif ($type == "add_student" || $type == "register_student") {
-    $query = "INSERT INTO students_master (admission, fullname, class_name, school_name) VALUES ($1, $2, $3, $4) ON CONFLICT (admission, school_name) DO UPDATE SET fullname = EXCLUDED.fullname";
+// --- 2. STUDENT REGISTRATION (SINGLE) ---
+} elseif ($type == "register_student") {
+    $query = "INSERT INTO students_master (admission, fullname, class_name, school_name) VALUES ($1, $2, $3, $4) ON CONFLICT (admission, class_name) DO UPDATE SET fullname = EXCLUDED.fullname";
     $result = pg_query_params($conn, $query, array($data['admission'], $data['fullname'], $data['class_name'], $data['school_name']));
     echo json_encode(["status" => $result ? "success" : "error"]);
 
-// --- 3. FETCH ALL ---
-// --- 3. FETCH ALL MASTER DATA ---
-// ... inside index.php ...
+// --- 3. BULK STUDENT UPLOAD ---
+} elseif ($type == "upload_all") {
+    $students = isset($data['students']) ? $data['students'] : [];
+    foreach ($students as $s) {
+        $query = "INSERT INTO students_master (admission, fullname, class_name, school_name) VALUES ($1, $2, $3, $4) ON CONFLICT (admission, class_name) DO UPDATE SET fullname = EXCLUDED.fullname";
+        pg_query_params($conn, $query, array($s['admission'], $s['fullname'], $s['class_name'], $s['school_name']));
+    }
+    echo json_encode(["status" => "success"]);
+
+// --- 4. FETCH MASTER DATA ---
 } elseif ($type == 'fetch_master_data') {
     $classes = pg_fetch_all(pg_query($conn, "SELECT * FROM classes"));
     $lessons = pg_fetch_all(pg_query($conn, "SELECT * FROM lessons"));
     
-    // Ensure we send valid JSON even if tables are empty
     echo json_encode([
         "classes" => $classes ? $classes : [],
         "lessons" => $lessons ? $lessons : []
     ]);
+
+} else {
+    echo json_encode(["status" => "error", "message" => "Invalid request type"]);
 }
 
 pg_close($conn);
