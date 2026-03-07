@@ -34,43 +34,30 @@ if ($type == "attendance" || $type == "attendance_upload") {
 
 // --- 3. BULK UPLOAD (Attendance AND Students) ---
 } elseif ($type == "upload_all") {
+    $success = true;
     $students = isset($data['students']) ? $data['students'] : [];
-    $attendance = isset($data['attendance_data']) ? $data['attendance_data'] : [];
+    $attendance_list = isset($data['attendance_data']) ? $data['attendance_data'] : [];
 
-    // Check if both are empty - this is why you see "Up to date" with no data
-    if (empty($students) && empty($attendance)) {
-        echo json_encode(["status" => "error", "message" => "No data received by server"]);
-        exit();
-    }
-
-    $count = 0;
+    // A. Handle Students
     foreach ($students as $s) {
         $query = "INSERT INTO students_master (admission, fullname, class_name, school_name) 
                   VALUES ($1, $2, $3, $4) 
                   ON CONFLICT (admission, class_name) DO UPDATE SET fullname = EXCLUDED.fullname";
-        $res = pg_query_params($conn, $query, array($s['admission'], $s['fullname'], $s['class_name'], $s['school_name']));
-        if ($res) $count++;
+        if (!pg_query_params($conn, $query, array($s['admission'], $s['fullname'], $s['class_name'], $s['school_name']))) {
+            $success = false;
+        }
     }
 
-    echo json_encode(["status" => "success", "message" => "Synced $count records"]);
-}
-
-    // B. Handle Attendance (This was missing in your upload_all block!)
-    $attendance_list = isset($data['attendance_data']) ? $data['attendance_data'] : [];
+    // B. Handle Attendance
     foreach ($attendance_list as $row) {
         $query = "INSERT INTO attendance_sync (student_adm, student_name, class_name, lesson_name, period_type, attendance_date) 
-                  VALUES ($1, $2, $3, $4, $5, $6)
-                  ON CONFLICT DO NOTHING"; // Prevent duplicates if same record sent twice
+                  VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING";
         if (!pg_query_params($conn, $query, array($row['student_adm'], $row['student_name'], $row['class_name'], $row['lesson_name'], $row['period_type'], $row['date']))) {
             $success = false;
         }
     }
 
-    if ($success) {
-        echo json_encode(["status" => "success", "message" => "All data synced successfully"]);
-    } else {
-        echo json_encode(["status" => "error", "message" => "Some data failed to save"]);
-    }
+    echo json_encode(["status" => $success ? "success" : "error", "message" => $success ? "Data synced" : "Sync partial failure"]);
 
 // --- 4. FETCH MASTER DATA ---
 } elseif ($type == 'fetch_master_data') {
@@ -81,7 +68,6 @@ if ($type == "attendance" || $type == "attendance_upload") {
         "classes" => $classes ? $classes : [],
         "lessons" => $lessons ? $lessons : []
     ]);
-    // ... after the fetch_master_data block ...
 
 } elseif ($type == 'debug_view') {
     $tables = ['classes', 'lessons', 'attendance_sync', 'students_master'];
@@ -97,5 +83,4 @@ if ($type == "attendance" || $type == "attendance_upload") {
 }
 
 pg_close($conn);
-
 ?>
