@@ -34,19 +34,26 @@ if ($type == "attendance" || $type == "attendance_upload") {
 
 // --- 3. BULK UPLOAD (Attendance AND Students) ---
 } elseif ($type == "upload_all") {
-    $success = true;
-
-    // A. Handle Students
     $students = isset($data['students']) ? $data['students'] : [];
+    $attendance = isset($data['attendance_data']) ? $data['attendance_data'] : [];
+
+    // Check if both are empty - this is why you see "Up to date" with no data
+    if (empty($students) && empty($attendance)) {
+        echo json_encode(["status" => "error", "message" => "No data received by server"]);
+        exit();
+    }
+
+    $count = 0;
     foreach ($students as $s) {
         $query = "INSERT INTO students_master (admission, fullname, class_name, school_name) 
                   VALUES ($1, $2, $3, $4) 
-                  ON CONFLICT (admission, class_name) 
-                  DO UPDATE SET fullname = EXCLUDED.fullname";
-        if (!pg_query_params($conn, $query, array($s['admission'], $s['fullname'], $s['class_name'], $s['school_name']))) {
-            $success = false;
-        }
+                  ON CONFLICT (admission, class_name) DO UPDATE SET fullname = EXCLUDED.fullname";
+        $res = pg_query_params($conn, $query, array($s['admission'], $s['fullname'], $s['class_name'], $s['school_name']));
+        if ($res) $count++;
     }
+
+    echo json_encode(["status" => "success", "message" => "Synced $count records"]);
+}
 
     // B. Handle Attendance (This was missing in your upload_all block!)
     $attendance_list = isset($data['attendance_data']) ? $data['attendance_data'] : [];
