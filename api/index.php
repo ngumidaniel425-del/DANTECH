@@ -25,6 +25,25 @@ if ($type == "attendance" || $type == "attendance_upload") {
         pg_query_params($conn, $query, array($row['student_adm'], $row['student_name'], $row['class_name'], $row['lesson_name'], $row['period_type'], $row['date']));
     }
     echo json_encode(["status" => "success"]);
+    // --- NEW: ADD LESSON WITH CONFLICT HANDLING ---
+} elseif ($type == "add_lesson") {
+    $teacher_id = isset($data['teacher_id']) ? $data['teacher_id'] : 0;
+    $lesson_name = isset($data['lesson_name']) ? $data['lesson_name'] : '';
+    $school_name = isset($data['school_name']) ? $data['school_name'] : '';
+
+    if (!empty($lesson_name)) {
+        // This query checks for a conflict on the 'lesson_name' column
+        // Ensure 'lesson_name' has a UNIQUE constraint in your Postgres table!
+        $query = "INSERT INTO lessons (teacher_id, lesson_name, school_name) 
+                  VALUES ($1, $2, $3) 
+                  ON CONFLICT (lesson_name) 
+                  DO UPDATE SET school_name = EXCLUDED.school_name, teacher_id = EXCLUDED.teacher_id";
+        
+        $result = pg_query_params($conn, $query, array($teacher_id, $lesson_name, $school_name));
+        echo json_encode(["status" => $result ? "success" : "error", "message" => "Lesson processed"]);
+    } else {
+        echo json_encode(["status" => "error", "message" => "Missing lesson name"]);
+    }
 
 // --- 2. STUDENT REGISTRATION (SINGLE) ---
 } elseif ($type == "register_student") {
