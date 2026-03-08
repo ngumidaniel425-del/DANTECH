@@ -25,7 +25,6 @@ $data = json_decode($jsonInput, true);
 if ($type == "attendance" || $type == "attendance_upload") {
     $attendance_list = isset($data['attendance_data']) ? $data['attendance_data'] : [];
     foreach ($attendance_list as $row) {
-        // RECTIFIED: Matching your schema column 'attendance_date'
         $query = "INSERT INTO attendance_sync (student_adm, class_name, lesson_name, period_type, attendance_date) 
                   VALUES ($1, $2, $3, $4, $5) 
                   ON CONFLICT DO NOTHING";
@@ -48,7 +47,7 @@ if ($type == "attendance" || $type == "attendance_upload") {
     $school_name = isset($data['school_name']) ? $data['school_name'] : '';
 
     if (!empty($lesson_name)) {
-        // RECTIFIED: Removed teacher_id because it is missing from your 'lessons' table screenshot
+        // This requires the UNIQUE (lesson_name) constraint you just ran in Neon!
         $query = "INSERT INTO lessons (lesson_name, school_name) 
                   VALUES ($1, $2) 
                   ON CONFLICT (lesson_name) 
@@ -95,7 +94,6 @@ if ($type == "attendance" || $type == "attendance_upload") {
     echo json_encode(["status" => $success ? "success" : "error", "message" => $success ? "Data synced" : "Sync partial failure"]);
 
 } elseif ($type == 'fetch_master_data') {
-    // RECTIFIED: Added students_master to the fetch so the app gets student data too
     $classes = pg_fetch_all(pg_query($conn, "SELECT * FROM classes"));
     $lessons = pg_fetch_all(pg_query($conn, "SELECT * FROM lessons"));
     $students = pg_fetch_all(pg_query($conn, "SELECT * FROM students_master"));
