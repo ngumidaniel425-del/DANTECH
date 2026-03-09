@@ -43,13 +43,11 @@ if ($type == "attendance" || $type == "attendance_upload") {
     }
 
 } elseif ($type == "add_lesson") {
-    // RECTIFIED: Now capturing lesson_name, class_name, and school_name
     $lesson_name = isset($data['lesson_name']) ? $data['lesson_name'] : '';
     $class_name = isset($data['class_name']) ? $data['class_name'] : '';
     $school_name = isset($data['school_name']) ? $data['school_name'] : '';
 
     if (!empty($lesson_name) && !empty($class_name)) {
-        // RECTIFIED: Inserting with class_name and using the new composite UNIQUE constraint
         $query = "INSERT INTO lessons (lesson_name, class_name, school_name) 
                   VALUES ($1, $2, $3) 
                   ON CONFLICT (lesson_name, class_name, school_name) 
@@ -71,8 +69,11 @@ if ($type == "attendance" || $type == "attendance_upload") {
 
 } elseif ($type == "upload_all") {
     $success = true;
+    // EXTENDED: Added classes and lessons arrays
     $students = isset($data['students']) ? $data['students'] : [];
     $attendance_list = isset($data['attendance_data']) ? $data['attendance_data'] : [];
+    $classes = isset($data['classes']) ? $data['classes'] : [];
+    $lessons = isset($data['lessons']) ? $data['lessons'] : [];
 
     foreach ($students as $s) {
         $query = "INSERT INTO students_master (admission, fullname, class_name, school_name) 
@@ -91,6 +92,17 @@ if ($type == "attendance" || $type == "attendance_upload") {
         if (!pg_query_params($conn, $query, array($row['student_adm'], $row['class_name'], $row['lesson_name'], $row['period_type'], $row['date']))) {
             $success = false;
         }
+    }
+    
+    // UPDATED: Loops to process your new incoming class/lesson arrays
+    foreach ($classes as $c) {
+        $query = "INSERT INTO classes (class_name) VALUES ($1) ON CONFLICT (class_name) DO NOTHING";
+        if (!pg_query_params($conn, $query, array($c['class_name']))) $success = false;
+    }
+
+    foreach ($lessons as $l) {
+        $query = "INSERT INTO lessons (lesson_name, class_name, school_name) VALUES ($1, $2, $3) ON CONFLICT (lesson_name, class_name, school_name) DO NOTHING";
+        if (!pg_query_params($conn, $query, array($l['lesson_name'], $l['class_name'], $l['school_name']))) $success = false;
     }
 
     echo json_encode(["status" => $success ? "success" : "error", "message" => $success ? "Data synced" : "Sync partial failure"]);
