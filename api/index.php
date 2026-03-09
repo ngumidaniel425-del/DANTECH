@@ -100,11 +100,23 @@ if ($type == "attendance" || $type == "attendance_upload") {
         if (!pg_query_params($conn, $query, array($c['class_name']))) $success = false;
     }
 
-    foreach ($lessons as $l) {
-        $query = "INSERT INTO lessons (lesson_name, class_name, school_name) VALUES ($1, $2, $3) ON CONFLICT (lesson_name, class_name, school_name) DO NOTHING";
-        if (!pg_query_params($conn, $query, array($l['lesson_name'], $l['class_name'], $l['school_name']))) $success = false;
+   // UPDATED DEBUG VERSION
+foreach ($lessons as $l) {
+    // Log what PHP is receiving
+    error_log("Processing Lesson: " . $l['lesson_name'] . " for Class: " . $l['class_name']);
+    
+    $query = "INSERT INTO lessons (lesson_name, class_name, school_name) 
+              VALUES ($1, $2, $3) 
+              ON CONFLICT (lesson_name, class_name, school_name) 
+              DO NOTHING";
+              
+    $result = pg_query_params($conn, $query, array($l['lesson_name'], $l['class_name'], $l['school_name']));
+    
+    if (!$result) {
+        error_log("Database Error: " . pg_last_error($conn));
+        $success = false;
     }
-
+}
     echo json_encode(["status" => $success ? "success" : "error", "message" => $success ? "Data synced" : "Sync partial failure"]);
 
 } elseif ($type == 'fetch_master_data') {
