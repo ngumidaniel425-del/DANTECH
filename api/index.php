@@ -43,20 +43,22 @@ if ($type == "attendance" || $type == "attendance_upload") {
     }
 
 } elseif ($type == "add_lesson") {
+    // RECTIFIED: Now capturing lesson_name, class_name, and school_name
     $lesson_name = isset($data['lesson_name']) ? $data['lesson_name'] : '';
+    $class_name = isset($data['class_name']) ? $data['class_name'] : '';
     $school_name = isset($data['school_name']) ? $data['school_name'] : '';
 
-    if (!empty($lesson_name)) {
-        // This requires the UNIQUE (lesson_name) constraint you just ran in Neon!
-        $query = "INSERT INTO lessons (lesson_name, school_name) 
-                  VALUES ($1, $2) 
-                  ON CONFLICT (lesson_name) 
-                  DO UPDATE SET school_name = EXCLUDED.school_name";
+    if (!empty($lesson_name) && !empty($class_name)) {
+        // RECTIFIED: Inserting with class_name and using the new composite UNIQUE constraint
+        $query = "INSERT INTO lessons (lesson_name, class_name, school_name) 
+                  VALUES ($1, $2, $3) 
+                  ON CONFLICT (lesson_name, class_name, school_name) 
+                  DO NOTHING";
         
-        $result = pg_query_params($conn, $query, array($lesson_name, $school_name));
+        $result = pg_query_params($conn, $query, array($lesson_name, $class_name, $school_name));
         echo json_encode(["status" => $result ? "success" : "error", "message" => "Lesson processed"]);
     } else {
-        echo json_encode(["status" => "error", "message" => "Missing lesson name"]);
+        echo json_encode(["status" => "error", "message" => "Missing lesson name or class name"]);
     }
 
 } elseif ($type == "register_student") {
