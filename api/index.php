@@ -24,13 +24,28 @@ $data = json_decode($jsonInput, true);
 // 3. Logic Router
 if ($type == "attendance" || $type == "attendance_upload") {
     $attendance_list = isset($data['attendance_data']) ? $data['attendance_data'] : [];
+    $success = true;
+    
     foreach ($attendance_list as $row) {
-        $query = "INSERT INTO attendance_sync (student_adm, class_name, lesson_name, period_type, attendance_date) 
-                  VALUES ($1, $2, $3, $4, $5) 
-                  ON CONFLICT DO NOTHING";
-        pg_query_params($conn, $query, array($row['student_adm'], $row['class_name'], $row['lesson_name'], $row['period_type'], $row['date']));
+        // RECTIFIED: Maps Android keys (adm, class, lesson) to DB columns
+        $query = "INSERT INTO attendance_sync (student_adm, class_name, lesson_name, period_type, attendance_date, student_name) 
+                  VALUES ($1, $2, $3, $4, $5, $6) 
+                  ON CONFLICT (student_adm, class_name, lesson_name, attendance_date) DO NOTHING";
+        
+        $params = array(
+            $row['adm'],    
+            $row['class'],  
+            $row['lesson'], 
+            $row['period'], 
+            $row['date'],   
+            isset($row['name']) ? $row['name'] : 'Unknown'
+        );
+
+        if (!pg_query_params($conn, $query, $params)) {
+            $success = false;
+        }
     }
-    echo json_encode(["status" => "success"]);
+    echo json_encode(["status" => $success ? "success" : "error"]);
 
 } elseif ($type == "add_class") {
     $class_name = isset($data['class_name']) ? $data['class_name'] : '';
@@ -50,13 +65,11 @@ if ($type == "attendance" || $type == "attendance_upload") {
     if (!empty($lesson_name) && !empty($class_name)) {
         $query = "INSERT INTO lessons (lesson_name, class_name, school_name) 
                   VALUES ($1, $2, $3) 
-                  ON CONFLICT (lesson_name, class_name, school_name) 
-                  DO NOTHING";
-        
+                  ON CONFLICT (lesson_name, class_name, school_name) DO NOTHING";
         $result = pg_query_params($conn, $query, array($lesson_name, $class_name, $school_name));
-        echo json_encode(["status" => $result ? "success" : "error", "message" => "Lesson processed"]);
+        echo json_encode(["status" => $result ? "success" : "error"]);
     } else {
-        echo json_encode(["status" => "error", "message" => "Missing lesson name or class name"]);
+        echo json_encode(["status" => "error", "message" => "Missing data"]);
     }
 
 } elseif ($type == "register_student") {
@@ -69,7 +82,6 @@ if ($type == "attendance" || $type == "attendance_upload") {
 
 } elseif ($type == "upload_all") {
     $success = true;
-    // EXTENDED: Added classes and lessons arrays
     $students = isset($data['students']) ? $data['students'] : [];
     $attendance_list = isset($data['attendance_data']) ? $data['attendance_data'] : [];
     $classes = isset($data['classes']) ? $data['classes'] : [];
@@ -80,64 +92,32 @@ if ($type == "attendance" || $type == "attendance_upload") {
                   VALUES ($1, $2, $3, $4) 
                   ON CONFLICT (admission, school_name) 
                   DO UPDATE SET fullname = EXCLUDED.fullname";
-        if (!pg_query_params($conn, $query, array($s['admission'], $s['fullname'], $s['class_name'], $s['school_name']))) {
-            $success = false;
-        }
+        if (!pg_query_params($conn, $query, array($s['admission'], $s['fullname'], $s['class_name'], $s['school_name']))) $success = false;
     }
 
     foreach ($attendance_list as $row) {
-        $query = "INSERT INTO attendance_sync (student_adm, class_name, lesson_name, period_type, attendance_date) 
-                  VALUES ($1, $2, $3, $4, $5) 
-                  ON CONFLICT DO NOTHING";
-        if (!pg_query_params($conn, $query, array($row['student_adm'], $row['class_name'], $row['lesson_name'], $row['period_type'], $row['date']))) {
-            $success = false;
-        }
-    }
-    
-    // UPDATED: Loops to process your new incoming class/lesson arrays
-    foreach ($classes as $c) {
-        $query = "INSERT INTO classes (class_name) VALUES ($1) ON CONFLICT (class_name) DO NOTHING";
-        if (!pg_query_params($conn, $query, array($c['class_name']))) $success = false;
+        $query = "INSERT INTO attendance_sync (student_adm, class_name, lesson_name, period_type, attendance_date, student_name) 
+                  VALUES ($1, $2, $3, $4, $5, $6) 
+                  ON CONFLICT (student_adm, class_name, lesson_name, attendance_date) DO NOTHING";
+        $params = array($row['adm'], $row['class'], $row['lesson'], $row['period'], $row['date'], $row['name']);
+        if (!pg_query_params($conn, $query, $params)) $success = false;
     }
 
-   // UPDATED DEBUG VERSION
-foreach ($lessons as $l) {
-    // Log what PHP is receiving
-    error_log("Processing Lesson: " . $l['lesson_name'] . " for Class: " . $l['class_name']);
-    
-    $query = "INSERT INTO lessons (lesson_name, class_name, school_name) 
-              VALUES ($1, $2, $3) 
-              ON CONFLICT (lesson_name, class_name, school_name) 
-              DO NOTHING";
-              
-    $result = pg_query_params($conn, $query, array($l['lesson_name'], $l['class_name'], $l['school_name']));
-    
-    if (!$result) {
-        error_log("Database Error: " . pg_last_error($conn));
-        $success = false;
+    foreach ($classes as $c) {
+        pg_query_params($conn, "INSERT INTO classes (class_name) VALUES ($1) ON CONFLICT (class_name) DO NOTHING", array($c['class_name']));
     }
-}
-    echo json_encode(["status" => $success ? "success" : "error", "message" => $success ? "Data synced" : "Sync partial failure"]);
+
+    foreach ($lessons as $l) {
+        pg_query_params($conn, "INSERT INTO lessons (lesson_name, class_name, school_name) VALUES ($1, $2, $3) ON CONFLICT (lesson_name, class_name, school_name) DO NOTHING", array($l['lesson_name'], $l['class_name'], $l['school_name']));
+    }
+
+    echo json_encode(["status" => $success ? "success" : "error"]);
 
 } elseif ($type == 'fetch_master_data') {
-    $classes = pg_fetch_all(pg_query($conn, "SELECT * FROM classes"));
-    $lessons = pg_fetch_all(pg_query($conn, "SELECT * FROM lessons"));
-    $students = pg_fetch_all(pg_query($conn, "SELECT * FROM students_master"));
-    
-    echo json_encode([
-        "classes" => $classes ? $classes : [],
-        "lessons" => $lessons ? $lessons : [],
-        "students" => $students ? $students : []
-    ]);
-
-} elseif ($type == 'debug_view') {
-    $tables = ['classes', 'lessons', 'attendance_sync', 'students_master'];
-    $debug_output = [];
-    foreach ($tables as $table) {
-        $result = pg_query($conn, "SELECT * FROM $table");
-        $debug_output[$table] = $result ? pg_fetch_all($result) : "No data";
-    }
-    echo json_encode($debug_output, JSON_PRETTY_PRINT);
+    $classes = pg_fetch_all(pg_query($conn, "SELECT DISTINCT class_name FROM classes"));
+    $lessons = pg_fetch_all(pg_query($conn, "SELECT DISTINCT lesson_name, class_name, school_name FROM lessons"));
+    $students = pg_fetch_all(pg_query($conn, "SELECT admission, fullname, class_name, school_name FROM students_master"));
+    echo json_encode(["classes" => $classes ?: [], "lessons" => $lessons ?: [], "students" => $students ?: []]);
 
 } else {
     echo json_encode(["status" => "error", "message" => "Invalid request type"]);
