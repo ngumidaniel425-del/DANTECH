@@ -21,112 +21,70 @@ $type = isset($_GET['type']) ? $_GET['type'] : '';
 $jsonInput = file_get_contents('php://input');
 $data = json_decode($jsonInput, true);
 
-// 3. Identify the School (Crucial for segregation)
-// We look for school_name in the URL parameters or the JSON body
-$school = isset($_GET['school_name']) ? $_GET['school_name'] : (isset($data['school_name']) ? $data['school_name'] : '');
-
-if (empty($school) && $type != 'register_teacher') {
-    echo json_encode(["status" => "error", "message" => "School name is required for sync"]);
-    exit();
-}
+// 3. Extract Context (School & Department)
+// Checked in both JSON body (POST) and URL (GET)
+$school = isset($data['school_name']) ? $data['school_name'] : (isset($_GET['school_name']) ? $_GET['school_name'] : '');
+$dept = isset($data['department']) ? $data['department'] : (isset($_GET['department']) ? $_GET['department'] : '');
 
 // 4. Logic Router
-if ($type == "attendance" || $type == "attendance_upload") {
-    $attendance_list = isset($data['attendance_data']) ? $data['attendance_data'] : [];
-    $success = true;
-    
-    foreach ($attendance_list as $row) {
-        // RECTIFIED: Added school_name to ensure unique attendance per school
-        $query = "INSERT INTO attendance_sync (student_adm, class_name, lesson_name, period_type, attendance_date, student_name, school_name) 
-                  VALUES ($1, $2, $3, $4, $5, $6, $7) 
-                  ON CONFLICT (student_adm, class_name, lesson_name, attendance_date, school_name) DO NOTHING";
-        
-        $params = array(
-            $row['adm'],    
-            $row['class'],  
-            $row['lesson'], 
-            $row['period'], 
-            $row['date'],   
-            isset($row['name']) ? $row['name'] : 'Unknown',
-            $school
-        );
+if ($type == "register_teacher") {
+    $password = password_hash($data['password'], PASSWORD_BCRYPT);
+    $query = "INSERT INTO teachers (fullname, email, phone, password, school_name, department) VALUES ($1, $2, $3, $4, $5, $6)";
+    $result = pg_query_params($conn, $query, array($data['fullname'], $data['email'], $data['phone'], $password, $data['school_name'], $data['department']));
+    echo json_encode(["status" => $result ? "success" : "error"]);
 
-        if (!pg_query_params($conn, $query, $params)) { $success = false; }
+} elseif ($type == "login") {
+    $query = "SELECT * FROM teachers WHERE email = $1";
+    $result = pg_query_params($conn, $query, array($data['email']));
+    $user = pg_fetch_assoc($result);
+    if ($user && password_verify($data['password'], $user['password'])) {
+        echo json_encode([
+            "status" => "success",
+            "teacher_id" => $user['id'],
+            "teacher_name" => $user['fullname'],
+            "school_name" => $user['school_name'],
+            "department" => $user['department'],
+            "phone" => $user['phone']
+        ]);
+    } else {
+        echo json_encode(["status" => "error", "message" => "Invalid credentials"]);
     }
-    echo json_encode(["status" => $success ? "success" : "error"]);
 
 } elseif ($type == "add_class") {
-    $class_name = isset($data['class_name']) ? $data['class_name'] : '';
-    if (!empty($class_name)) {
-        // RECTIFIED: Classes are now unique to each school
-        $query = "INSERT INTO classes (class_name, school_name) VALUES ($1, $2) ON CONFLICT (class_name, school_name) DO NOTHING";
-        $result = pg_query_params($conn, $query, array($class_name, $school));
-        echo json_encode(["status" => "success"]);
-    } else {
-        echo json_encode(["status" => "error", "message" => "Class name empty"]);
-    }
+    // RECTIFIED: Class is now isolated to the Department
+    $query = "INSERT INTO classes (class_name, school_name, department) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING";
+    $result = pg_query_params($conn, $query, array($data['class_name'], $school, $dept));
+    echo json_encode(["status" => "success"]);
 
 } elseif ($type == "add_lesson") {
-    $lesson_name = isset($data['lesson_name']) ? $data['lesson_name'] : '';
-    $class_name = isset($data['class_name']) ? $data['class_name'] : '';
-
-    if (!empty($lesson_name) && !empty($class_name)) {
-        $query = "INSERT INTO lessons (lesson_name, class_name, school_name) 
-                  VALUES ($1, $2, $3) 
-                  ON CONFLICT (lesson_name, class_name, school_name) DO NOTHING";
-        $result = pg_query_params($conn, $query, array($lesson_name, $class_name, $school));
-        echo json_encode(["status" => $result ? "success" : "error"]);
-    } else {
-        echo json_encode(["status" => "error", "message" => "Missing data"]);
-    }
-
-} elseif ($type == "register_student") {
-    $query = "INSERT INTO students_master (admission, fullname, class_name, school_name) 
-              VALUES ($1, $2, $3, $4) 
-              ON CONFLICT (admission, school_name) 
-              DO UPDATE SET fullname = EXCLUDED.fullname, class_name = EXCLUDED.class_name";
-    $result = pg_query_params($conn, $query, array($data['admission'], $data['fullname'], $data['class_name'], $school));
-    echo json_encode(["status" => $result ? "success" : "error"]);
+    // RECTIFIED: Lesson is bound to the specific Class and Department
+    $query = "INSERT INTO lessons (lesson_name, class_name, school_name, department) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING";
+    $result = pg_query_params($conn, $query, array($data['lesson_name'], $data['class_name'], $school, $dept));
+    echo json_encode(["status" => "success"]);
 
 } elseif ($type == "upload_all") {
     $success = true;
     $students = isset($data['students']) ? $data['students'] : [];
-    $attendance_list = isset($data['attendance_data']) ? $data['attendance_data'] : [];
-    $classes = isset($data['classes']) ? $data['classes'] : [];
-    $lessons = isset($data['lessons']) ? $data['lessons'] : [];
+    $attendance = isset($data['attendance_data']) ? $data['attendance_data'] : [];
 
-    // All loops updated to force the current school context
     foreach ($students as $s) {
-        $query = "INSERT INTO students_master (admission, fullname, class_name, school_name) 
-                  VALUES ($1, $2, $3, $4) 
-                  ON CONFLICT (admission, school_name) 
-                  DO UPDATE SET fullname = EXCLUDED.fullname, class_name = EXCLUDED.class_name";
-        if (!pg_query_params($conn, $query, array($s['admission'], $s['fullname'], $s['class_name'], $school))) $success = false;
+        $q = "INSERT INTO students_master (admission, fullname, class_name, school_name, department) 
+              VALUES ($1, $2, $3, $4, $5) ON CONFLICT (admission, school_name) DO UPDATE SET fullname=EXCLUDED.fullname, class_name=EXCLUDED.class_name";
+        if (!pg_query_params($conn, $q, array($s['admission'], $s['fullname'], $s['class_name'], $school, $dept))) $success = false;
     }
 
-    foreach ($attendance_list as $row) {
-        $query = "INSERT INTO attendance_sync (student_adm, class_name, lesson_name, period_type, attendance_date, student_name, school_name) 
-                  VALUES ($1, $2, $3, $4, $5, $6, $7) 
-                  ON CONFLICT (student_adm, class_name, lesson_name, attendance_date, school_name) DO NOTHING";
-        $params = array($row['adm'], $row['class'], $row['lesson'], $row['period'], $row['date'], $row['name'], $school);
-        if (!pg_query_params($conn, $query, $params)) $success = false;
+    foreach ($attendance as $row) {
+        $q = "INSERT INTO attendance_sync (student_adm, class_name, lesson_name, period_type, attendance_date, student_name, school_name, department) 
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT DO NOTHING";
+        if (!pg_query_params($conn, $q, array($row['adm'], $row['class'], $row['lesson'], $row['period'], $row['date'], $row['name'], $school, $dept))) $success = false;
     }
-
-    foreach ($classes as $c) {
-        pg_query_params($conn, "INSERT INTO classes (class_name, school_name) VALUES ($1, $2) ON CONFLICT (class_name, school_name) DO NOTHING", array($c['class_name'], $school));
-    }
-
-    foreach ($lessons as $l) {
-        pg_query_params($conn, "INSERT INTO lessons (lesson_name, class_name, school_name) VALUES ($1, $2, $3) ON CONFLICT (lesson_name, class_name, school_name) DO NOTHING", array($l['lesson_name'], $l['class_name'], $school));
-    }
-
     echo json_encode(["status" => $success ? "success" : "error"]);
 
 } elseif ($type == 'fetch_master_data') {
-    // RECTIFIED: Only fetch data that belongs to THIS school
-    $classes = pg_fetch_all(pg_query_params($conn, "SELECT class_name FROM classes WHERE school_name = $1", array($school)));
-    $lessons = pg_fetch_all(pg_query_params($conn, "SELECT lesson_name, class_name FROM lessons WHERE school_name = $1", array($school)));
-    $students = pg_fetch_all(pg_query_params($conn, "SELECT admission, fullname, class_name FROM students_master WHERE school_name = $1", array($school)));
+    // RECTIFIED: Fetch ONLY data belonging to this specific School and Department
+    $classes = pg_fetch_all(pg_query_params($conn, "SELECT class_name FROM classes WHERE school_name = $1 AND department = $2", array($school, $dept)));
+    $lessons = pg_fetch_all(pg_query_params($conn, "SELECT lesson_name, class_name FROM lessons WHERE school_name = $1 AND department = $2", array($school, $dept)));
+    $students = pg_fetch_all(pg_query_params($conn, "SELECT admission, fullname, class_name FROM students_master WHERE school_name = $1 AND department = $2", array($school, $dept)));
     
     echo json_encode([
         "classes" => $classes ?: [], 
